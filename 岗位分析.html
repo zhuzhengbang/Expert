@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>专家岗位分析系统</title>
+    <!-- 引入Bootstrap样式 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- 引入ECharts可视化 -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <!-- 引入表格解析库（支持Excel/CSV） -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <style>
+        .card { margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .chart-container { height: 400px; margin: 10px 0; }
+        .field-item { margin-bottom: 8px; }
+        .preview-table { max-height: 300px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+<div class="container mt-4">
+    <h2 class="text-center mb-4 text-primary">专家岗位分析系统</h2>
+
+    <!-- 1. 自定义字段设置区域 -->
+    <div class="card">
+        <div class="card-header bg-light fw-bold">第一步：自定义岗位表格字段（设置分析维度）</div>
+        <div class="card-body">
+            <div class="row mb-3">
+                <div class="col-md-8">
+                    <label class="form-label">岗位字段列表（可增删改，标记分析维度字段）</label>
+                    <div id="fieldList"></div>
+                    <button class="btn btn-sm btn-outline-primary mt-2" onclick="addField()">+ 新增字段</button>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">分析维度绑定</label>
+                    <div class="mb-2">
+                        <label class="form-label small">部门维度字段：</label>
+                        <select id="deptField" class="form-select form-select-sm" onchange="refreshAnalysis()">
+                            <option value="">请选择部门字段</option>
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small">专家级别字段：</label>
+                        <select id="levelField" class="form-select form-select-sm" onchange="refreshAnalysis()">
+                            <option value="">请选择级别字段</option>
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small">岗位类别字段：</label>
+                        <select id="typeField" class="form-select form-select-sm" onchange="refreshAnalysis()">
+                            <option value="">请选择类别字段</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <button class="btn btn-primary" onclick="saveFields()">保存字段配置</button>
+            <small class="text-danger ms-2">* 必须先保存字段，再导入数据</small>
+        </div>
+    </div>
+
+    <!-- 2. 数据批量导入区域 -->
+    <div class="card">
+        <div class="card-header bg-light fw-bold">第二步：批量导入岗位数据（支持Excel/CSV）</div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label">选择表格文件</label>
+                <input type="file" id="fileInput" class="form-control" accept=".xlsx,.xls,.csv" onchange="importFile()">
+                <small class="text-muted">* 表格第一行必须与上方自定义字段名完全一致</small>
+            </div>
+            <button class="btn btn-success" onclick="clearData()">清空所有数据</button>
+        </div>
+    </div>
+
+    <!-- 3. 数据预览区域 -->
+    <div class="card">
+        <div class="card-header bg-light fw-bold">数据预览</div>
+        <div class="card-body preview-table">
+            <table class="table table-striped table-sm" id="previewTable">
+                <thead></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- 4. 统计数据面板 -->
+    <div class="card">
+        <div class="card-header bg-light fw-bold">专家岗位统计概览</div>
+        <div class="card-body">
+            <div class="row text-center" id="statPanel">
+                <div class="col-md-3"><div class="p-3 bg-light rounded">总专家数：<span class="fw-bold text-primary" id="totalCount">0</span></div></div>
+                <div class="col-md-3"><div class="p-3 bg-light rounded">部门数：<span class="fw-bold text-success" id="deptCount">0</span></div></div>
+                <div class="col-md-3"><div class="p-3 bg-light rounded">专家级别数：<span class="fw-bold text-warning" id="levelCount">0</span></div></div>
+                <div class="col-md-3"><div class="p-3 bg-light rounded">岗位类别数：<span class="fw-bold text-info" id="typeCount">0</span></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 5. 实时分析图表区域 -->
+    <div class="card">
+        <div class="card-header bg-light fw-bold">第三步：实时多维度分析图表</div>
+        <div class="card-body">
+            <div class="row">
+                <div class="col-md-8">
+                    <div class="chart-container" id="deptChart"></div> <!-- 部门专家浓度 -->
+                </div>
+                <div class="col-md-4">
+                    <div class="chart-container" id="levelChart"></div> <!-- 级别分布 -->
+                </div>
+            </div>
+            <div class="row mt-3">
+                <div class="col-md-4">
+                    <div class="chart-container" id="typeChart"></div> <!-- 类别分布 -->
+                </div>
+                <div class="col-md-8">
+                    <div class="chart-container" id="crossChart"></div> <!-- 交叉分析 -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 全局变量
+let customFields = []; // 自定义字段
+let positionData = []; // 岗位数据
+let charts = {}; // 图表实例
+
+// 初始化默认字段
+window.onload = function() {
+    initDefaultFields();
+    initCharts();
+}
+
+// 1. 字段管理功能
+function initDefaultFields() {
+    customFields = [
+        {name: "岗位名称", isDim: false},
+        {name: "所属部门", isDim: true},
+        {name: "专家级别", isDim: true},
+        {name: "岗位类别", isDim: true},
+        {name: "工作年限", isDim: false}
+    ];
+    renderFieldList();
+    saveFields();
+}
+
+// 渲染字段列表
+function renderFieldList() {
+    let html = "";
+    customFields.forEach((item, index) => {
+        html += `
+            <div class="field-item d-flex gap-2">
+                <input type="text" class="form-control form-control-sm" value="${item.name}" onchange="updateField(${index}, this.value)">
+                <button class="btn btn-sm btn-outline-danger" onclick="deleteField(${index})">×</button>
+            </div>
+        `;
+    });
+    document.getElementById("fieldList").innerHTML = html;
+}
+
+// 新增字段
+function addField() {
+    customFields.push({name: "新字段", isDim: false});
+    renderFieldList();
+}
+
+// 更新字段名
+function updateField(index, name) {
+    customFields[index].name = name;
+    saveFields();
+}
+
+// 删除字段
+function deleteField(index) {
+    if(customFields.length <= 3) {
+        alert("至少保留3个字段！");
+        return;
+    }
+    customFields.splice(index, 1);
+    renderFieldList();
+    saveFields();
+}
+
+// 保存字段并更新维度选择器
+function saveFields() {
+    let fieldOptions = customFields.map(item => `<option value="${item.name}">${item.name}</option>`).join("");
+    document.getElementById("deptField").innerHTML = `<option value="">请选择部门字段</option>` + fieldOptions;
+    document.getElementById("levelField").innerHTML = `<option value="">请选择级别字段</option>` + fieldOptions;
+    document.getElementById("typeField").innerHTML = `<option value="">请选择类别字段</option>` + fieldOptions;
+    // 默认绑定常用维度
+    document.getElementById("deptField").value = "所属部门";
+    document.getElementById("levelField").value = "专家级别";
+    document.getElementById("typeField").value = "岗位类别";
+    refreshAnalysis();
+}
+
+// 2. 数据导入功能
+function importFile() {
+    let file = document.getElementById("fileInput").files[0];
+    if(!file) {
+        alert("请选择文件！");
+        return;
+    }
+    let reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            let data = new Uint8Array(e.target.result);
+            let workbook = XLSX.read(data, {type: 'array'});
+            let firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+            // 解析为JSON
+            positionData = XLSX.utils.sheet_to_json(firstSheet);
+            renderPreviewTable();
+            refreshAnalysis();
+            alert(`导入成功！共${positionData.length}条岗位数据`);
+        } catch (error) {
+            alert("文件解析失败，请检查表格格式！");
+            console.error(error);
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+// 渲染数据预览表
+function renderPreviewTable() {
+    if(positionData.length === 0) {
+        document.getElementById("previewTable").innerHTML = "<thead><tr><th>暂无数据</th></tr></thead>";
+        return;
+    }
+    // 表头
+    let thead = "<tr>" + customFields.map(item => `<th>${item.name}</th>`).join("") + "</tr>";
+    // 表体
+    let tbody = "";
+    positionData.slice(0, 10).forEach(item => { // 只显示前10行
+        tbody += "<tr>";
+        customFields(field => {
+            tbody += `<td>${item[field.name] || "-"}</td>`;
+        });
+        tbody += "</tr>";
+    });
+    document.getElementById("previewTable").innerHTML = `<thead>${thead}</thead><tbody>${tbody}</tbody>`;
+}
+
+// 清空数据
+function clearData() {
+    positionData = [];
+    document.getElementById("fileInput").value = "";
+    renderPreviewTable();
+    refreshAnalysis();
+    alert("数据已清空！");
+}
+
+// 3. 初始化图表
+function initCharts() {
+    charts.dept = echarts.init(document.getElementById("deptChart"));
+    charts.level = echarts.init(document.getElementById("levelChart"));
+    charts.type = echarts.init(document.getElementById("typeChart"));
+    charts.cross = echarts.init(document.getElementById("crossChart"));
+    // 窗口自适应
+    window.addEventListener("resize", () => {
+        Object.values(charts).forEach(chart => chart.resize());
+    });
+}
+
+// 4. 实时刷新分析数据和图表
+function refreshAnalysis() {
+    if(positionData.length === 0) {
+        setEmptyCharts();
+        updateStatPanel();
+        return;
+    }
+    // 获取维度字段
+    let deptField = document.getElementById("deptField").value;
+    let levelField = document.getElementById("levelField").value;
+    let typeField = document.getElementById("typeField").value;
+    
+    // 数据统计
+    let deptData = statisticData(positionData, deptField);
+    let levelData = statisticData(positionData, levelField);
+    let typeData = statisticData(positionData, typeField);
+    let crossData = getCrossData(positionData, deptField, levelField);
+    
+    // 更新统计面板
+    updateStatPanel(deptData.length, levelData.length, typeData.length);
+    
+    // 更新图表
+    renderDeptChart(deptData, deptField);
+    renderLevelChart(levelData, levelField);
+    renderTypeChart(typeData, typeField);
+    renderCrossChart(crossData, deptField, levelField);
+}
+
+// 数据统计工具（按维度分组计数）
+function statisticData(data, field) {
+    if(!field) return [];
+    let result = {};
+    data.forEach(item => {
+        let key = item[field] || "未分类";
+        result[key] = (result[key] || 0) + 1;
+    });
+    // 转为数组并排序
+    return Object.entries(result).map(([name, value]) => ({name, value})).sort((a,b) => b.value - a.value);
+}
+
+// 交叉数据统计（部门+级别）
+function getCrossData(data, deptField, levelField) {
+    if(!deptField || !levelField) return [];
+    let result = {};
+    let levels = new Set();
+    data.forEach(item => {
+        let dept = item[deptField] || "未分类";
+        let level = item[levelField] || "未分类";
+        levels.add(level);
+        if(!result[dept]) result[dept] = {};
+        result[dept][level] = (result[dept][level] || 0) + 1;
+    });
+    return {depts: Object.keys(result), levels: Array.from(levels), data: result};
+}
+
+// 更新统计面板
+function updateStatPanel(deptCnt=0, levelCnt=0, typeCnt=0) {
+    document.getElementById("totalCount").textContent = positionData.length;
+    document.getElementById("deptCount").textContent = deptCnt;
+    document.getElementById("levelCount").textContent = levelCnt;
+    document.getElementById("typeCount").textContent = typeCnt;
+}
+
+// 5. 图表渲染
+// 部门专家浓度图
+function renderDeptChart(data, field) {
+    let option = {
+        title: {text: `${field}专家浓度分布`, left: 'center'},
+        xAxis: {type: 'category', data: data.map(item => item.name), axisLabel: {rotate: 30}},
+        yAxis: {type: 'value', name: '专家数量'},
+        series: [{type: 'bar', data: data.map(item => item.value), itemStyle: {color: '#5470c6'}}],
+        tooltip: {trigger: 'axis'}
+    };
+    charts.dept.setOption(option);
+}
+
+// 专家级别分布饼图
+function renderLevelChart(data, field) {
+    let option = {
+        title: {text: `${field}分布`, left: 'center'},
+        series: [{type: 'pie', radius: '60%', data: data, itemStyle: {borderRadius: 5}}],
+        tooltip: {trigger: 'item', formatter: '{b}: {c} ({d}%)'}
+    };
+    charts.level.setOption(option);
+}
+
+// 岗位类别分布饼图
+function renderTypeChart(data, field) {
+    let option = {
+        title: {text: `${field}分布`, left: 'center'},
+        series: [{type: 'pie', radius: '60%', data: data, itemStyle: {borderRadius: 5}}],
+        tooltip: {trigger: 'item', formatter: '{b}: {c} ({d}%)'}
+    };
+    charts.type.setOption(option);
+}
+
+// 交叉分析图
+function renderCrossChart(data, deptField, levelField) {
+    let option = {
+        title: {text: `${deptField}-${levelField}交叉分析`, left: 'center'},
+        legend: {data: data.levels, bottom: 0},
+        xAxis: {type: 'category', data: data.depts, axisLabel: {rotate: 30}},
+        yAxis: {type: 'value', name: '专家数量'},
+        series: data.levels.map(level => ({
+            name: level, type: 'bar', stack: 'total',
+            data: data.depts.map(dept => data.data[dept][level] || 0)
+        })),
+        tooltip: {trigger: 'axis'}
+    };
+    charts.cross.setOption(option);
+}
+
+// 空图表状态
+function setEmptyCharts() {
+    let emptyOption = {title: {text: '暂无数据', left: 'center'}};
+    Object.values(charts).forEach(chart => chart.setOption(emptyOption));
+    updateStatPanel();
+}
+</script>
+</body>
+</html>
