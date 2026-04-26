@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>专家岗位管理系统</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css">
+  <style>
+    body { font-family: "Microsoft YaHei", sans-serif; background: #f5f7fa; padding-bottom: 50px; }
+    .header { background: linear-gradient(135deg, #2c5282, #4a5568); color: white; padding: 20px; border-radius: 8px; margin-bottom: 25px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    .card { border-radius: 10px; box-shadow: 0 3px 15px rgba(0,0,0,0.08); margin-bottom: 20px; border: none; }
+    .card-header { background: #f8f9fa; font-weight: bold; }
+    .import-area { padding: 30px; text-align: center; border: 2px dashed #cbd5e0; border-radius: 10px; background: white; }
+    .table-responsive { max-height: 400px; overflow-y: auto; }
+    .stat-item { padding: 15px; background: #e8f4fd; border-radius: 8px; margin-bottom: 10px; }
+    .chart-container { height: 350px; position: relative; }
+    .section-title { border-left: 5px solid #2c5282; padding-left: 12px; margin: 30px 0 20px; font-size: 1.25rem; font-weight: bold; }
+    .search-box { background: white; padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+  </style>
+</head>
+<body>
+<div class="container mt-4">
+  <div class="header">
+    <h2><i class="fa fa-users"></i> 专家岗位管理系统</h2>
+    <p class="mb-0">Excel导入 | 筛选查询 | 多维度分析 | 浓度计算</p>
+  </div>
+
+  <div class="search-box" id="searchArea" style="display:none;">
+    <div class="row align-items-center">
+      <div class="col-md-9">
+        <input type="text" id="searchInput" class="form-control" placeholder="全局搜索：部门、岗位、姓名、工号、变化点...">
+      </div>
+      <div class="col-md-3 mt-2 mt-md-0">
+        <button class="btn btn-outline-primary w-100" id="searchBtn"><i class="fa fa-search"></i> 筛选查询</button>
+      </div>
+    </div>
+    <div class="mt-2 text-muted" id="searchResultTips"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><i class="fa fa-upload"></i> 专家岗位信息表导入</div>
+    <div class="card-body">
+      <div class="import-area" id="dropArea">
+        <p class="text-muted mb-3">必须包含列：岗位服务领域&部门、部门预算、变化点、是否首席岗位、是否AI岗位</p>
+        <button class="btn btn-primary btn-lg" id="importBtn"><i class="fa fa-file-excel-o"></i> 选择Excel文件导入</button>
+        <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
+        <p class="mt-3 mb-0 text-success" id="importTips" style="display:none;">文件解析中，请稍候...</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="dataTableCard" style="display:none;">
+    <div class="card-header"><i class="fa fa-table"></i> 已导入专家岗位数据</div>
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-hover table-bordered" id="dataTable"><thead class="table-light"></thead><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <div id="analysisResult" style="display:none;">
+    <div class="section-title">岗位服务领域&部门 统计分析</div>
+    <div class="card"><div class="card-body"><div class="chart-container"><canvas id="chart1"></canvas></div><div id="analysis1Table" class="mt-3"></div></div></div>
+
+    <div class="section-title">岗位资源SAP部门 统计分析</div>
+    <div class="card"><div class="card-body"><div class="chart-container"><canvas id="chart2"></canvas></div><div id="analysis2Table" class="mt-3"></div></div></div>
+
+    <div class="section-title">首席岗位专项分析</div>
+    <div class="card"><div class="card-body"><div class="row"><div class="col-md-6"><div class="chart-container"><canvas id="chart3"></canvas></div></div><div class="col-md-6"><div id="analysis3Content" class="stat-item"></div></div></div></div></div>
+
+    <div class="section-title">AI岗位专项分析</div>
+    <div class="card"><div class="card-body"><div class="row"><div class="col-md-6"><div class="chart-container"><canvas id="chart4"></canvas></div></div><div class="col-md-6"><div id="analysis4Content" class="stat-item"></div></div></div></div></div>
+
+    <div class="section-title">分部门岗位数量 & 岗位浓度</div>
+    <div class="card">
+      <div class="card-header">岗位浓度 = 部门实际岗位数 ÷ 部门预算数</div>
+      <div class="card-body">
+        <div class="chart-container"><canvas id="chart5"></canvas></div>
+        <div id="analysis5Table" class="mt-3"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let rawData = [], filteredData = [], headers = [];
+const fileInput = document.getElementById('fileInput');
+const importBtn = document.getElementById('importBtn');
+const importTips = document.getElementById('importTips');
+const dataTableCard = document.getElementById('dataTableCard');
+const analysisResult = document.getElementById('analysisResult');
+const searchArea = document.getElementById('searchArea');
+const searchInput = document.getElementById('searchInput');
+const searchBtn = document.getElementById('searchBtn');
+const searchResultTips = document.getElementById('searchResultTips');
+
+importBtn.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', (e) => {
+  const file = e.target.files[0]; if (!file) return;
+  importTips.style.display = 'block';
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const data = new Uint8Array(ev.target.result);
+      const workbook = XLSX.read(data, { type: 'array' });
+      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+      const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+      parseExcelData(jsonData);
+    } catch (err) { alert('解析失败：' + err.message);
+    } finally { importTips.style.display = 'none'; }
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+searchBtn.addEventListener('click', doSearch);
+searchInput.addEventListener('keyup', (e) => e.key === 'Enter' && doSearch());
+
+function parseExcelData(jsonData) {
+  if (jsonData.length < 2) { alert('数据不能为空！'); return; }
+  headers = jsonData[0].map(h => h?.toString().trim() || '未知');
+  rawData = jsonData.slice(1).filter(r => r.length > 0).map(row => {
+    let obj = {}; headers.forEach((h, i) => obj[h] = row[i] || ''); return obj;
+  });
+  filteredData = [...rawData];
+  renderDataTable();
+  runAllAnalysis();
+  searchArea.style.display = 'block';
+  dataTableCard.style.display = 'block';
+  analysisResult.style.display = 'block';
+  searchResultTips.textContent = `共导入 ${rawData.length} 条数据`;
+}
+
+function doSearch() {
+  const kw = searchInput.value.trim().toLowerCase();
+  filteredData = kw ? rawData.filter(row => Object.values(row).some(v => v?.toString().toLowerCase().includes(kw))) : [...rawData];
+  renderDataTable(); runAllAnalysis();
+  searchResultTips.textContent = `筛选结果：${filteredData.length} 条`;
+}
+
+function renderDataTable() {
+  const thead = document.querySelector('#dataTable thead');
+  const tbody = document.querySelector('#dataTable tbody');
+  thead.innerHTML = `<tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
+  tbody.innerHTML = filteredData.map(row => `<tr>${headers.map(h => `<td>${row[h] || ''}</td>`).join('')}</tr>`).join('');
+}
+
+function runAllAnalysis() { analysis1(); analysis2(); analysis3(); analysis4(); analysis5(); }
+
+function getChangeStats(list) {
+  const m = {}; list.forEach(c => { const k = c || '无变化'; m[k] = (m[k] || 0) + 1; });
+  let t = `总数：${list.length}`;
+  Object.entries(m).forEach(([k, v]) => t += ` | ${k}：${v}个`);
+  return t;
+}
+
+// 1 岗位服务领域&部门
+function analysis1() {
+  const f = '岗位服务领域&部门'; const m = {};
+  filteredData.forEach(row => {
+    const k = row[f] || '未分类'; const c = row['变化点'] || '';
+    if (!m[k]) m[k] = { total:0, changes:[] };
+    m[k].total++; m[k].changes.push(c);
+  });
+  renderChart('chart1', Object.keys(m), Object.values(m).map(x=>x.total), 'bar', '数量');
+  const rows = Object.entries(m).map(([k,v])=>[k, v.total, getChangeStats(v.changes)]);
+  renderAnalysisTable('analysis1Table', ['部门','岗位数量','变化点统计'], rows);
+}
+
+// 2 SAP部门
+function analysis2() {
+  const f = '岗位资源SAP部门'; const m = {};
+  filteredData.forEach(row => {
+    const k = row[f] || '未分类'; const c = row['变化点'] || '';
+    if (!m[k]) m[k] = { total:0, changes:[] };
+    m[k].total++; m[k].changes.push(c);
+  });
+  renderChart('chart2', Object.keys(m), Object.values(m).map(x=>x.total), 'bar', '数量');
+  const rows = Object.entries(m).map(([k,v])=>[k, v.total, getChangeStats(v.changes)]);
+  renderAnalysisTable('analysis2Table', ['SAP部门','岗位数量','变化点统计'], rows);
+}
+
+// 3 首席
+function analysis3() {
+  const c = filteredData.filter(r => (r['是否首席岗位']+'').trim()==='是');
+  renderChart('chart3', ['首席','非首席'], [c.length, filteredData.length-c.length], 'pie', '占比');
+  document.getElementById('analysis3Content').innerHTML = `
+  <h5>统计</h5><p>总岗位：${filteredData.length}</p><p>首席：${c.length}</p><p>占比：${(c.length/filteredData.length*100).toFixed(1)}%</p>`;
+}
+
+// 4 AI
+function analysis4() {
+  const a = filteredData.filter(r => (r['是否AI岗位']+'').trim()==='是');
+  renderChart('chart4', ['AI','非AI'], [a.length, filteredData.length-a.length], 'pie', '占比');
+  document.getElementById('analysis4Content').innerHTML = `
+  <h5>统计</h5><p>总岗位：${filteredData.length}</p><p>AI岗位：${a.length}</p><p>占比：${(a.length/filteredData.length*100).toFixed(1)}%</p>`;
+}
+
+// 5 分部门 - 数量 + 预算 + 浓度（核心修改）
+function analysis5() {
+  const deptField = '岗位服务领域&部门';
+  const budgetField = '部门预算'; // 必须在Excel里有这一列
+  const map = {};
+
+  filteredData.forEach(row => {
+    const dept = row[deptField] || '未分类';
+    const budget = parseFloat(row[budgetField]) || 0;
+    if (!map[dept]) map[dept] = { count:0, budget: budget };
+    map[dept].count++;
+  });
+
+  const labels = Object.keys(map);
+  const counts = labels.map(k => map[k].count);
+  renderChart('chart5', labels, counts, 'bar', '岗位数');
+
+  const tableRows = labels.map(dept => {
+    const { count, budget } = map[dept];
+    const ratio = budget > 0 ? (count / budget).toFixed(2) : '0.00';
+    return [dept, count, budget, ratio];
+  });
+
+  renderAnalysisTable('analysis5Table', ['部门', '实际岗位数', '部门预算数', '岗位浓度'], tableRows);
+}
+
+function renderChart(id, labels, data, type, label) {
+  const ctx = document.getElementById(id).getContext('2d');
+  new Chart(ctx, {
+    type: type === 'pie' ? 'pie' : 'bar',
+    data: { labels, datasets: [{ label, data, backgroundColor: type==='pie' ? ['#4e79a7','#f28e2c','#e15759'] : 'rgba(44,82,130,0.7)' }]},
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' }}}
+  });
+}
+
+function renderAnalysisTable(id, heads, rows) {
+  const html = `<table class="table table-sm table-bordered"><thead class="table-light"><tr>${heads.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  document.getElementById(id).innerHTML = html;
+}
+</script>
+</body>
+</html>
